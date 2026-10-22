@@ -223,4 +223,18 @@
     }];
 }
 
++ (void)previewVoice:(NSString *)text rate:(float)rate {
+    if (text.length == 0) return;
+    AVSpeechUtterance *u = [AVSpeechUtterance speechUtteranceWithString:text];
+    AVSpeechSynthesisVoice *v = [AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
+    if (v) u.voice = v;
+    float r = rate * AVSpeechUtteranceDefaultSpeechRate;
+    u.rate = MAX(0.1f, MIN(r, AVSpeechUtteranceMaximumSpeechRate));
+    static AVSpeechSynthesizer *synth = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ synth = [[AVSpeechSynthesizer alloc] init]; });
+    if (synth.isSpeaking) { [synth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate]; }
+    [synth speakUtterance:u];
+}
+
 @end

@@ -20,6 +20,9 @@ NS_ASSUME_NONNULL_BEGIN
             progress:(nullable void (^)(double value))progress
           completion:(void (^)(NSError * _Nullable error))completion;
 
+/// 本机语音快速试听（正式配音仍走 Edge/Azure）
++ (void)previewVoice:(NSString *)text rate:(float)rate;
+
 @end
 
 NS_ASSUME_NONNULL_END

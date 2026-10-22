@@ -112,7 +112,12 @@ struct AudioCard: View {
             MPTSliderRow(title: "配音语速", range: 0.5...2, step: 0.1,
                          value: $config.params.voiceRate,
                          valueText: String(format: "%.1f×", config.params.voiceRate))
-            MPTAccentButton(title: "试听配音", icon: "music.note") {}
+            MPTAccentButton(title: "试听配音", icon: "music.note") {
+                let t = config.params.videoScript.isEmpty
+                    ? "你好，我是配音试听。文案生成后这里会朗读成片文案。"
+                    : String(config.params.videoScript.prefix(60))
+                MPTComposer.previewVoice(t, rate: Float(config.params.voiceRate))
+            }
             MPTSelectRow(title: "背景音乐来源",
                          options: MPTConst.bgmTypes,
                          selection: $config.params.bgmType)
