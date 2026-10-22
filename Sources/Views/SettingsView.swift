@@ -45,12 +45,6 @@ struct SettingsView: View {
                         .font(MPTStyle.caption())
                         .foregroundColor(MPTStyle.textSecondary)
                 }
-
-                Section("Novel to Video") {
-                    Text("Paste novel text for auto-segmented video generation.\nEach segment uses professional prompt templates with Ken Burns effects.")
-                        .font(MPTStyle.caption())
-                        .foregroundColor(MPTStyle.textSecondary)
-                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

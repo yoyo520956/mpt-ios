@@ -53,8 +53,6 @@ final class ConfigStore: ObservableObject {
 
     // MARK: - Persistence
     private let prefs = UserDefaults.standard
-    private let keys = ["llmModel", "llmImageModel", "llmVideoModel", "llmBaseURL", "llmAPIKey",
-                        "uiLanguage", "logLevel", "params"]
 
     init() {
         loadPersisted()

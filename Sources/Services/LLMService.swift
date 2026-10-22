@@ -41,9 +41,11 @@ struct OpenAICompatibleProvider: LLMProvider {
 final class LLMService {
     static let shared = LLMService()
 
-    /// 取当前配置的有效 provider（走 ConfigStore 内置默认值）
     func provider(_ config: ConfigStore) -> OpenAICompatibleProvider {
-        config.provider()
+        OpenAICompatibleProvider(name: config.llmModel.isEmpty ? "llm" : config.llmModel,
+                                  baseURL: config.llmBaseURL,
+                                  apiKey: config.key("llm_api_key"),
+                                  model: config.llmModel)
     }
 
     /// 生成视频文案
