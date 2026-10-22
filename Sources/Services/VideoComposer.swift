@@ -75,7 +75,7 @@ final class VideoComposer {
         guard t.hasPrefix("#") else { return fallback }
         t.removeFirst()
         if t.count == 3 { t = t.map { "\($0)\($0)" }.joined() }
-        guard t.count == 6, let v = UInt64(t, 16) else { return fallback }
+        guard t.count == 6, let v = UInt64(t, radix: 16) else { return fallback }
         return UIColor(red: CGFloat((v >> 16) & 0xFF) / 255.0,
                        green: CGFloat((v >> 8) & 0xFF) / 255.0,
                        blue: CGFloat(v & 0xFF) / 255.0, alpha: 1)
@@ -97,7 +97,7 @@ final class VideoComposer {
             if para.isEmpty { lines.append(""); continue }
             var cur = ""
             for ch in para {
-                let cand = cur + ch
+                let cand = cur + String(ch)
                 if CGFloat((cand as NSString).size(withAttributes: [.font: font]).width) > maxW, !cur.isEmpty {
                     lines.append(cur); cur = String(ch)
                 } else { cur = cand }

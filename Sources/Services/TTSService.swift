@@ -160,7 +160,7 @@ final class TTSService {
     private func md5Hex(_ s: String) -> String {
         let d = s.data(using: .utf8)!
         var out = [UInt8](repeating: 0, count: Int(CC_MD5_DIGEST_LENGTH))
-        d.withUnsafeBytes { _ = CC_MD5($0.baseAddress, d.count, &out) }
+        d.withUnsafeBytes { _ = CC_MD5($0.baseAddress, CC_LONG(d.count), &out) }
         return out.map { String(format: "%02x", $0) }.joined()
     }
 }

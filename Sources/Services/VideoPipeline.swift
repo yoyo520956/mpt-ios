@@ -124,7 +124,7 @@ final class VideoPipeline {
         let res = await composer.compose(clips: files, subtitles: subs, narration: narration, bgm: bgm,
                                              params: p, outURL: outURL,
                                              onProgress: { pct in
-            prog("合成视频… \(pct)%", 80 + pct / 5)
+            prog("合成视频… \(Int(pct * 100))%", 80 + Int(pct * 19))
         })
         try? fm.removeItem(at: work)
 
