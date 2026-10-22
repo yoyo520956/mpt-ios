@@ -1,0 +1,50 @@
+name: build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tooling
+        run: |
+          brew install xcodegen
+          gem install xcpretty
+      - name: Generate project
+        run: xcodegen generate
+      - name: Guard (防假成功)
+        run: |
+          SW=$(grep -c '\.swift' MoneyPrinterTurbo.xcodeproj/project.pbxproj || true)
+          echo "swift refs: $SW"
+          [ "$SW" -ge 12 ] || { echo "::error::Swift 源文件未进工程 ($SW)"; exit 1; }
+      - name: Archive
+        run: |
+          set -o pipefail
+          xcodebuild -project MoneyPrinterTurbo.xcodeproj -scheme MoneyPrinterTurbo \
+            -configuration Release -archivePath build/MoneyPrinterTurbo.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            archive | xcpretty --format github
+      - name: Export IPA (无证书 → Payload zip)
+        run: |
+          mkdir -p build/Payload
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -name 'MoneyPrinterTurbo.app' -path '*iphoneos*' | head -1)
+          if [ -z "$APP" ]; then echo "::error::未找到 .app"; exit 1; fi
+          cp -R "$APP" build/Payload/
+          (cd build && zip -qry MoneyPrinterTurbo-unsigned.ipa Payload)
+      - name: Verify
+        run: |
+          unzip -l build/MoneyPrinterTurbo-unsigned.ipa | grep -q Info.plist
+          strings -a build/MoneyPrinterTurbo-unsigned.ipa | grep -q "MoneyPrinterTurbo" || { echo "::error::缺特征串"; exit 1; }
+          python3 -c "import zipfile,plistlib;z=zipfile.ZipFile('build/MoneyPrinterTurbo-unsigned.ipa');p=plistlib.loads(z.read('Payload/MoneyPrinterTurbo.app/Info.plist'));print('version:',p['CFBundleShortVersionString'],p['CFBundleVersion']);print('bundle:',p['CFBundleIdentifier']);print('display:',p['CFBundleDisplayName'])"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MoneyPrinterTurbo-unsigned-ipa
+          path: build/MoneyPrinterTurbo-unsigned.ipa
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: gh release upload "${GITHUB_REF_NAME}" build/MoneyPrinterTurbo-unsigned.ipa --clobber
