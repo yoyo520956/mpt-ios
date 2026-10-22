@@ -7,24 +7,29 @@ permissions:
   contents: write
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
-      - name: SDK health check (真机 SDK 是否被裁)
+      - name: Install full iOS device platform (镜像的 device SDK 是残桩)
         run: |
           xcodebuild -version
-          xcrun swiftc -version
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          echo "SDK=$SDK"
+          echo "SDK before = $SDK"
+          du -sh "$SDK" 2>/dev/null || true
           H="$SDK/System/Library/Frameworks/AVFoundation.framework/Headers"
-          for pat in "videoTracks" "addMutableTrackWithMediaType:fromTrack:atTime:" "@property.*CMTime duration"; do
-            if grep -q "$pat" "$H/AVComposition.h" "$H/AVAssetTrack.h" 2>/dev/null; then
-              echo "OK  $pat"
-            else
-              echo "MISSING  $pat"
-            fi
-          done
+          echo "videoTracks in AVFoundation Headers before:"
+          grep -rln "videoTracks" "$H" 2>/dev/null | head -5 || true
+          echo "=== downloading iOS device platform ==="
+          sudo xcodebuild -downloadPlatform iOS 2>&1 | tail -25 || true
+          du -sh "$SDK" 2>/dev/null || true
+          echo "videoTracks in AVFoundation Headers after:"
+          grep -rln "videoTracks" "$H" 2>/dev/null | head -5 || true
+
+      - name: Probe device SDK (不通过就整体失败并留证据)
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          H="$SDK/System/Library/Frameworks/AVFoundation.framework/Headers"
           cat > /tmp/probe.swift <<'EOF'
           import AVFoundation
           import CoreMedia
@@ -43,7 +48,18 @@ jobs:
           }
           if let s = try? AVAssetExportSession(asset: c, outputFileType: AVFileType.mp4) { _ = s }
           EOF
-          xcrun swiftc -typecheck -sdk "$SDK" -target arm64-apple-ios16.0 /tmp/probe.swift             && echo "PROBE PASS" || echo "PROBE FAIL(见上)"
+          if xcrun swiftc -typecheck -sdk "$SDK" -target arm64-apple-ios16.0 /tmp/probe.swift; then
+            echo "PROBE PASS"
+          else
+            echo "PROBE FAIL —— dump 证据："
+            ls -la "$H" | head -20
+            grep -n "videoTracks" "$H"/*.h | head -5 || echo "(videoTracks 不在任何 header)"
+            grep -n "duration" "$H/AVAssetTrack.h" | head -10 || true
+            grep -n "class AVMutableComposition\|@interface AVMutableComposition" "$H"/*.h | head -5 || true
+            echo "=== showsdks ==="
+            xcodebuild -showsdks 2>/dev/null | head -15 || true
+            exit 1
+          fi
 
       - name: Install xcodegen
         run: |
