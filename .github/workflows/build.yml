@@ -10,55 +10,93 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Forensics: AVFoundation SDK 布局 + ObjC 对照
+      - uses: maxim-lobanov/setup-xcode@v1
+        continue-on-error: true
+        with:
+          xcode-version: '16.4'
+
+      - name: AVFoundation 头文件速查
         run: |
           xcodebuild -version
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          echo "SDK=$SDK"
-          echo "=== SDK 根目录 ==="
-          ls -la "$SDK" | head -15
-          echo "=== SDKSettings ==="
-          cat "$SDK/SDKSettings.plist" 2>/dev/null | head -20 || echo "(无)"
           H="$SDK/System/Library/Frameworks/AVFoundation.framework/Headers"
-          echo "=== Headers 文件数 ==="
-          ls "$H" | wc -l
-          echo "=== AVComposition.h 行数 / 是否截断 ==="
-          wc -l "$H/AVComposition.h" 2>/dev/null || echo "(不存在)"
-          echo "--- head 30 ---"
-          head -30 "$H/AVComposition.h" 2>/dev/null
-          echo "--- @interface 列表 ---"
-          grep -n "@interface\|@property.*Tracks\|videoTracks" "$H/AVComposition.h" 2>/dev/null | head -20
-          echo "=== AVAssetTrack.h 行数 / duration 声明 ==="
-          wc -l "$H/AVAssetTrack.h" 2>/dev/null
-          grep -n "duration" "$H/AVAssetTrack.h" 2>/dev/null | head -10
-          echo "=== 全 framework 内 videoTracks 出现处 ==="
-          grep -rln "videoTracks" "$SDK/System/Library/Frameworks/AVFoundation.framework/" 2>/dev/null | head -10
-          echo "=== 是否存在 swiftmodule / swiftinterface ==="
-          find "$SDK" -maxdepth 4 -name "AVFoundation*" 2>/dev/null | head -20
-          ls "$SDK/usr/lib" 2>/dev/null | head
-          TC="/Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain"
-          ls "$TC/usr/lib/swift" 2>/dev/null | wc -l
-          ls "$TC/usr/lib/swift" 2>/dev/null | grep -i "avf\|coremedia\|avfaudio" | head
-          echo "=== ObjC 层对照编译 ==="
-          cat > /tmp/t.m <<'EOF'
-          #import <AVFoundation/AVFoundation.h>
-          void t(void) {
-              AVMutableComposition *c = [[AVMutableComposition alloc] init];
-              NSArray *vt = c.videoTracks;
-              AVMutableAudioMix *m = [[AVMutableAudioMix alloc] init];
-              NSArray *in = m.inputs;
-              AVMutableAudioMixInputTrack *a = [[AVMutableAudioMixInputTrack alloc] init];
-              AVAsset *a2 = [[AVURLAsset alloc] init];
-              CMTime d = [[[a2 tracksWithMediaType:AVMediaTypeVideo] firstObject] duration];
-              AVAssetExportSession *s = [[AVAssetExportSession alloc] initWithAsset:c outputFileType:AVFileTypeMPEG4];
-              (void)vt; (void)in; (void)a; (void)d; (void)s;
-          }
-          EOF
-          clang -x objective-c -fsyntax-only -fmodules -sdk "$SDK" -target arm64-apple-ios16.0 /tmp/t.m 2>&1 | head -30             && echo "OBJC PASS" || echo "OBJC FAIL"
-          echo "=== 再试其它已装 Xcode 的 device SDK ==="
-          ls -d /Applications/Xcode_*.app 2>/dev/null
-          for X in 16.3 16.2 16.1 15.4; do
-            P="/Applications/Xcode_$X.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs"
-            [ -d "$P" ] && { echo "-- $X"; ls "$P"; }
-          done
-          echo "=== 结束 ==="
+          echo "--- AVAsset.h duration ---"; grep -n "CMTime duration" "$H/AVAsset.h" | head -3
+          echo "--- insertTimeRange ---"; grep -rn "insertTimeRange:" "$H" | head -4
+          echo "--- layerInstruction 构造 ---"; grep -rn "videoCompositionLayerInstructionWithAssetTrack\|initWithAssetTrack" "$H" | head -4
+          echo "--- videoCompositionInstruction 工厂 ---"; grep -rn "videoCompositionInstruction" "$H" | head -4
+          echo "--- layerInstructions ---"; grep -rn "layerInstructions" "$H" | head -4
+          echo "--- AVMutableAudioMixInputTrack ---"; grep -rn "AVMutableAudioMixInputTrack" "$H" | head -4
+          echo "--- AVAudioMix.h inputs ---"; grep -rn "inputs\|inputParameters" "$H/AVAudioMix.h" | head -6
+          echo "--- AVAssetExportSession 初始化 ---"; grep -n "initWithAsset\|outputFileType\|exportAsynchronously" "$H/AVAssetExportSession.h" | head -8
+          echo "--- AVVideoComposition 属性 ---"; grep -n "renderSize\|frameDuration\|instructions" "$H/AVVideoComposition.h" | head -6
+
+      - name: Install xcodegen
+        run: |
+          command -v xcodegen >/dev/null 2>&1 || brew install --quiet xcodegen
+          xcodegen version
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Guard (防假成功)
+        run: |
+          SW=$(grep -c '\.swift' MoneyPrinterTurbo.xcodeproj/project.pbxproj || true)
+          MM=$(grep -c '\.m in Sources' MoneyPrinterTurbo.xcodeproj/project.pbxproj || true)
+          echo "swift refs: $SW / objc m refs: $MM"
+          [ "$SW" -ge 12 ] || { echo "::error::Swift 源文件未进工程"; exit 1; }
+          [ "$MM" -ge 1 ] || { echo "::error::ObjC 桥未进工程"; exit 1; }
+          grep -q "MPT-Bridging-Header.h" MoneyPrinterTurbo.xcodeproj/project.pbxproj \
+            || grep -q "SWIFT_OBJC_BRIDGING_HEADER" MoneyPrinterTurbo.xcodeproj/project.pbxproj \
+            || { echo "::error::桥接头未配置"; exit 1; }
+
+      - name: Archive
+        run: |
+          xcodebuild -project MoneyPrinterTurbo.xcodeproj -scheme MoneyPrinterTurbo \
+            -configuration Release -archivePath build/MoneyPrinterTurbo.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
+            archive > build.log 2>&1 || true
+          echo "=== errors ==="
+          grep -nE "error:" build.log | head -60
+          grep -q "ARCHIVE SUCCEEDED" build.log || { echo "::error::BUILD FAILED"; tail -25 build.log; exit 1; }
+
+      - name: Export IPA (无证书 → Payload zip)
+        run: |
+          APP=build/MoneyPrinterTurbo.xcarchive/Products/Applications/MoneyPrinterTurbo.app
+          [ -d "$APP" ] || { echo "no .app"; exit 1; }
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          cd build && zip -qry MoneyPrinterTurbo-unsigned.ipa Payload && cd ..
+          ls -l build/MoneyPrinterTurbo-unsigned.ipa
+
+      - name: Verify
+        run: |
+          python3 - <<'PY'
+          import zipfile, plistlib, hashlib, os
+          p = "build/MoneyPrinterTurbo-unsigned.ipa"
+          z = zipfile.ZipFile(p)
+          names = z.namelist()
+          plist = None
+          for n in names:
+              if n.endswith("Info.plist") and "Frameworks" not in n:
+                  try: plist = plistlib.loads(z.read(n))
+                  except Exception: pass
+          md5 = hashlib.md5(open(p, "rb").read()).hexdigest()
+          print("ipa_bytes:", os.path.getsize(p), "md5:", md5)
+          print("version:", plist.get("CFBundleShortVersionString"), plist.get("CFBundleVersion"))
+          print("id:", plist.get("CFBundleIdentifier"), plist.get("CFBundleDisplayName"))
+          for key in ("Assets.car", "BeVietnamPro-Bold.ttf", "azure_voices.json", "output000.mp3"):
+              print(key, "->", any(key in n for n in names))
+          assert plist is not None and plist.get("CFBundleShortVersionString") == "1.1.0"
+          PY
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: gh release upload "${GITHUB_REF_NAME}" build/MoneyPrinterTurbo-unsigned.ipa --clobber
