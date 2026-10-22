@@ -18,7 +18,7 @@ enum VideoAspect: String, Codable, CaseIterable {
     }
 }
 enum VideoFitMode: String, Codable, CaseIterable { case cover, contain }
-enum ImageMotion: String, Codable, CaseIterable { case static, zoom }
+enum ImageMotion: String, Codable, CaseIterable { case `static` = "static", zoom = "zoom" }
 enum SubtitleDisplayMode: String, Codable, CaseIterable { case sentence, wordByWord = "word_by_word" }
 enum SubtitleAnimation: String, Codable, CaseIterable { case none, popSpring = "pop_spring" }
 

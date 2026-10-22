@@ -19,19 +19,19 @@ final class ConfigStore: ObservableObject {
 
     // Key 列表（1:1 原版设置页 API Key 组）
     static let keyItems: [KeyItem] = [
-        ("llm_api_key", "LLM API Key", "LLM"),
-        ("pexels_api_key", "Pexels API Key", "Material"),
-        ("pixabay_api_key", "Pixabay API Key", "Material"),
-        ("coverr_api_key", "Coverr API Key", "Material"),
-        ("metaso_api_key", "Metaso API Key", "Video Gen"),
-        ("muapi_api_key", "MuAPI API Key", "Video Gen"),
-        ("ofox_api_key", "OFox API Key", "Video Gen"),
-        ("seedance_api_key", "Volcano Engine Seedance API Key", "Video Gen"),
-        ("elevenlabs_api_key", "ElevenLabs API Key", "Voice"),
-        ("sonilo_api_key", "Sonilo API Key", "Voice"),
-        ("siliconflow_api_key", "SiliconFlow API Key", "Voice"),
-        ("twelvelabs_api_key", "TwelveLabs API Key", "Video Gen"),
-        ("upload_post_api_key", "Upload Post API Key", "Publish")
+        KeyItem(id: "llm_api_key", label: "LLM API Key", group: "LLM"),
+        KeyItem(id: "pexels_api_key", label: "Pexels API Key", group: "Material"),
+        KeyItem(id: "pixabay_api_key", label: "Pixabay API Key", group: "Material"),
+        KeyItem(id: "coverr_api_key", label: "Coverr API Key", group: "Material"),
+        KeyItem(id: "metaso_api_key", label: "Metaso API Key", group: "Video Gen"),
+        KeyItem(id: "muapi_api_key", label: "MuAPI API Key", group: "Video Gen"),
+        KeyItem(id: "ofox_api_key", label: "OFox API Key", group: "Video Gen"),
+        KeyItem(id: "seedance_api_key", label: "Volcano Engine Seedance API Key", group: "Video Gen"),
+        KeyItem(id: "elevenlabs_api_key", label: "ElevenLabs API Key", group: "Voice"),
+        KeyItem(id: "sonilo_api_key", label: "Sonilo API Key", group: "Voice"),
+        KeyItem(id: "siliconflow_api_key", label: "SiliconFlow API Key", group: "Voice"),
+        KeyItem(id: "twelvelabs_api_key", label: "TwelveLabs API Key", group: "Video Gen"),
+        KeyItem(id: "upload_post_api_key", label: "Upload Post API Key", group: "Publish")
     ]
 
     func key(_ id: String) -> String { KeychainStore.get(id) }
