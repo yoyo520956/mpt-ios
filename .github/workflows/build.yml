@@ -7,73 +7,107 @@ permissions:
   contents: write
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - uses: maxim-lobanov/setup-xcode@v1
-        continue-on-error: true
-        with:
-          xcode-version: '16.4'
-      - name: Diagnose SDK API
+
+      - name: SDK health check (真机 SDK 是否被裁)
         run: |
-          echo "### 版本"
-          xcode-select -p
           xcodebuild -version
           xcrun swiftc -version
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          echo "### SDK=$SDK"
-          ls -d "$SDK" || echo "SDK PATH 不存在!"
-          echo "### AVFoundation 头文件是否有 videoTracks / duration"
+          echo "SDK=$SDK"
           H="$SDK/System/Library/Frameworks/AVFoundation.framework/Headers"
-          ls "$H" 2>/dev/null | head -8
-          grep -n "videoTracks" "$H/AVComposition.h" | head -5
-          grep -n "addMutableTrackWithMediaType" "$H/AVComposition.h" | head -8
-          grep -n "duration" "$H/AVAssetTrack.h" | head -5
-          grep -n "outputFileType" "$H/AVAssetExportSession.h" | head -8
-          grep -rn "AVMutableAudioMixInputTrack" "$H/AVAudioMix.h" | head -3
-          echo "### Swift overlay 是否存在"
-          ls "$SDK/usr/lib/swift/iphoneos" 2>/dev/null | grep -i avfoundation || echo "NO AVFoundation swiftmodule"
-          ls "$SDK/usr/lib/swift-5.0/iphoneos" 2>/dev/null | grep -i avfoundation || echo "NO swift-5.0 overlay"
-          echo "### probe 完整输出（head 60）"
+          for pat in "videoTracks" "addMutableTrackWithMediaType:fromTrack:atTime:" "@property.*CMTime duration"; do
+            if grep -q "$pat" "$H/AVComposition.h" "$H/AVAssetTrack.h" 2>/dev/null; then
+              echo "OK  $pat"
+            else
+              echo "MISSING  $pat"
+            fi
+          done
           cat > /tmp/probe.swift <<'EOF'
           import AVFoundation
-          import CoreImage
           import CoreMedia
           let c = AVMutableComposition()
           _ = c.videoTracks
-          let m = AVMutableAudioMix()
-          _ = m.inputs
+          _ = AVMutableAudioMix().inputs
           _ = AVMutableAudioMixInputTrack.self
-          _ = CMTime.zero
-          _ = AVFileType.mp4
           _ = AVMutableVideoComposition().hasAudio
           _ = AVVideoCompositionLayerInstruction.self
-          _ = kCIInputImageKey
+          _ = AVFileType.mp4
+          _ = CMTime.zero
           let a = AVURLAsset(url: URL(fileURLWithPath: "/tmp/x.mp4"))
           if let s = a.tracks(withMediaType: AVMediaType.video).first {
               _ = s.duration
               _ = s.naturalSize
           }
           if let s = try? AVAssetExportSession(asset: c, outputFileType: AVFileType.mp4) { _ = s }
-          let w = URLSession.shared.webSocketTask(with: URL(string: "wss://x")!)
-          func rr(_ m: URLSessionWebSocketTask.Message) {
-              if case .close = m { print("close") }
-          }
-          _ = rr
-          _ = w
           EOF
-          xcrun swiftc -typecheck -module-cache-path /tmp/mc -sdk "$SDK" -target arm64-apple-ios16.0 /tmp/probe.swift 2>&1 | head -60
-          echo "### 探针退出码: ${PIPESTATUS[0]}"
-          echo "### 对比：不带 -sdk（默认 macOS SDK）"
-          cat > /tmp/probe2.swift <<'EOF'
-          import AVFoundation
-          let c = AVMutableComposition()
-          _ = c.videoTracks
-          _ = AVMutableAudioMixInputTrack.self
-          let a = AVURLAsset(url: URL(fileURLWithPath: "/tmp/x.mp4"))
-          if let s = a.tracks(withMediaType: AVMediaType.video).first { _ = s.duration }
-          EOF
-          xcrun swiftc -typecheck -sdk "$(xcrun --sdk macosx --show-sdk-path)" /tmp/probe2.swift 2>&1 | head -20
-          echo "### 对比：iOS Simulator SDK"
-          xcrun swiftc -typecheck -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" -target x86_64-apple-ios16.0-simulator /tmp/probe2.swift 2>&1 | head -20
-          echo "### 诊断完成（本 job 不构建）"
+          xcrun swiftc -typecheck -sdk "$SDK" -target arm64-apple-ios16.0 /tmp/probe.swift             && echo "PROBE PASS" || echo "PROBE FAIL(见上)"
+
+      - name: Install xcodegen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install --quiet xcodegen; fi
+          xcodegen version
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Guard (防假成功)
+        run: |
+          SW=$(grep -c '\.swift' MoneyPrinterTurbo.xcodeproj/project.pbxproj || true)
+          echo "swift refs: $SW"
+          [ "$SW" -ge 12 ] || { echo "::error::Swift 源文件未进工程 ($SW)"; exit 1; }
+
+      - name: Archive
+        run: |
+          xcodebuild -project MoneyPrinterTurbo.xcodeproj -scheme MoneyPrinterTurbo             -configuration Release -archivePath build/MoneyPrinterTurbo.xcarchive             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY=""             archive > build.log 2>&1 || true
+          echo "=== error 摘要 ==="
+          grep -nE "error:" build.log | head -80
+          echo "=== 退出判定 ==="
+          grep -q "ARCHIVE SUCCEEDED" build.log || { tail -30 build.log; exit 1; }
+
+      - name: Export IPA (无证书 → Payload zip)
+        run: |
+          APP=build/MoneyPrinterTurbo.xcarchive/Products/Applications/MoneyPrinterTurbo.app
+          [ -d "$APP" ] || { echo "no .app"; exit 1; }
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          cd build && zip -qry MoneyPrinterTurbo-unsigned.ipa Payload && cd ..
+          ls -l build/MoneyPrinterTurbo-unsigned.ipa
+
+      - name: Verify
+        run: |
+          python3 - <<'PY'
+          import zipfile, plistlib, hashlib, os
+          p = "build/MoneyPrinterTurbo-unsigned.ipa"
+          z = zipfile.ZipFile(p)
+          names = z.namelist()
+          ipa = os.path.getsize(p)
+          plist = None
+          for n in names:
+              if n.endswith("Info.plist") and "Frameworks" not in n:
+                  try: plist = plistlib.loads(z.read(n))
+                  except Exception: pass
+          md5 = hashlib.md5(open(p, "rb").read()).hexdigest()
+          print("ipa_bytes:", ipa, "md5:", md5)
+          print("version:", plist.get("CFBundleShortVersionString"), plist.get("CFBundleVersion"))
+          print("id:", plist.get("CFBundleIdentifier"), plist.get("CFBundleDisplayName"))
+          for key in ("Assets.car", "BeVietnamPro-Bold.ttf", "azure_voices.json", "output000.mp3"):
+              print(key, "->", any(key in n for n in names))
+          assert ipa > 500_000, "IPA 过小"
+          assert plist and plist.get("CFBundleShortVersionString") == "1.1.0", "版本不符"
+          PY
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" build/MoneyPrinterTurbo-unsigned.ipa --clobber
