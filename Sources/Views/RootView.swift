@@ -1,27 +1,23 @@
 import SwiftUI
 
-/// 主界面：1:1 还原原版 Streamlit 布局
-/// 顶部品牌栏 → 四列设置卡片（文案/视频/音频/字幕）→ 底部通栏"生成视频"
+/// 主界面（移动端竖版布局）：顶部品牌栏 → 四张卡片纵向堆叠（文案/视频/音频/字幕）→ 底部通栏"生成视频"
 struct RootView: View {
     @EnvironmentObject private var config: ConfigStore
     @EnvironmentObject private var tasks: TaskManager
     @State private var showSettings = false
     @State private var showTasks = false
     @State private var isGenerating = false
-    @State private var toast: String = ""
+    @State private var step: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
             TopBar(showSettings: $showSettings, showTasks: $showTasks)
             ScrollView {
                 VStack(spacing: MPTStyle.s4) {
-                    HStack(alignment: .top, spacing: MPTStyle.s4) {
-                        ScriptCard()
-                        VideoCard()
-                        AudioCard()
-                        SubtitleCard()
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
+                    ScriptCard()
+                    VideoCard()
+                    AudioCard()
+                    SubtitleCard()
                 }
                 .padding(MPTStyle.s4)
             }
@@ -29,10 +25,15 @@ struct RootView: View {
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: MPTStyle.s2) {
-                if !toast.isEmpty {
-                    Text(toast)
-                        .font(MPTStyle.caption())
-                        .foregroundColor(MPTStyle.textSecondary)
+                if !step.isEmpty {
+                    HStack(spacing: MPTStyle.s2) {
+                        if isGenerating { ProgressView().tint(MPTStyle.textSecondary) }
+                        Text(step)
+                            .font(MPTStyle.caption())
+                            .foregroundColor(MPTStyle.textSecondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
                 }
                 Button {
                     Task { await generate() }
@@ -59,36 +60,36 @@ struct RootView: View {
         .sheet(isPresented: $showTasks) { TasksView() }
     }
 
-    /// P1：生成链路占位（真实出片在 P2 核心流水线）
+    /// P2 全流水线：文案 → 关键词 → 素材检索/下载 → 配音 → BGM → AVFoundation 合成 → MP4
     private func generate() async {
-        guard !config.params.videoSubject.isEmpty else {
-            toast = "请先填写视频主题"
-            return
-        }
+        let subject = config.params.videoSubject.trimmingCharacters(in: .whitespaces)
+        guard !subject.isEmpty else { step = "请先填写视频主题"; return }
         isGenerating = true
-        toast = ""
-        let task = tasks.create(subject: config.params.videoSubject)
+        step = "准备中…"
+        let task = tasks.create(subject: subject)
+        let pipe = VideoPipeline()
+        pipe.onProgress = { msg, pct in
+            DispatchQueue.main.async {
+                step = msg
+                tasks.update(task.id, progress: pct)
+            }
+        }
         do {
-            let script = try await LLMService.shared.generateScript(
-                subject: config.params.videoSubject,
-                language: config.params.videoLanguage,
-                paragraphNumber: config.params.paragraphNumber,
-                scriptPrompt: config.params.videoScriptPrompt,
-                systemPrompt: config.params.customSystemPrompt,
-                config: config)
-            config.params.videoScript = script
-            tasks.update(task.id, state: MPTConst.taskComplete, progress: 100)
-            toast = "文案已生成（P2 接入合成流水线）"
+            let out = try await pipe.run(config: config)
+            if let s = out.script { config.params.videoScript = s }
+            tasks.update(task.id, state: MPTConst.taskComplete, progress: 100,
+                         outputPath: out.url.path, note: out.note)
+            step = "完成 · " + out.url.lastPathComponent
         } catch {
             MPTLog.error("生成失败：\(error.localizedDescription)")
-            tasks.update(task.id, state: MPTConst.taskFailed, progress: 0, error: error.localizedDescription)
-            toast = error.localizedDescription
+            tasks.update(task.id, state: MPTConst.taskFailed, error: error.localizedDescription)
+            step = "失败：" + error.localizedDescription
         }
         isGenerating = false
     }
 }
 
-/// 顶部品牌栏（MoneyPrinterTurbo v1.3.9 · 任务管理 · ⚙设置 · 语言）
+/// 顶部品牌栏（MoneyPrinterTurbo v1.3.9 · 移动紧凑版：单行不换行 + 图标菜单）
 struct TopBar: View {
     @EnvironmentObject private var config: ConfigStore
     @Binding var showSettings: Bool
@@ -98,28 +99,26 @@ struct TopBar: View {
         HStack(spacing: MPTStyle.s3) {
             HStack(spacing: MPTStyle.s2) {
                 Text("MoneyPrinterTurbo")
-                    .font(MPTStyle.title(17))
+                    .font(MPTStyle.title(14))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .foregroundColor(MPTStyle.textPrimary)
                 Text("v\(MPTConst.originalVersion)")
                     .font(MPTStyle.caption())
                     .foregroundColor(MPTStyle.textSecondary)
                     .padding(.horizontal, MPTStyle.s2)
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 1)
                     .background(MPTStyle.controlBackground)
                     .clipShape(Capsule())
             }
-            Spacer()
+            Spacer(minLength: MPTStyle.s2)
             Menu {
                 Button("任务管理") { showTasks = true }
             } label: {
-                Label("任务管理", systemImage: "list.bullet")
-                    .font(MPTStyle.body())
-                    .foregroundColor(MPTStyle.textPrimary)
+                Image(systemName: "list.bullet.rectangle")
             }
             Button { showSettings = true } label: {
-                Label("设置", systemImage: "gearshape")
-                    .font(MPTStyle.body())
-                    .foregroundColor(MPTStyle.textPrimary)
+                Image(systemName: "gearshape")
             }
             Menu {
                 ForEach(MPTConst.uiLanguages.indices, id: \.self) { i in
@@ -136,16 +135,24 @@ struct TopBar: View {
                 }
             } label: {
                 HStack(spacing: MPTStyle.s1) {
-                    Text(MPTConst.uiLanguages.first(where: { $0.0 == config.uiLanguage })?.1 ?? "简体中文")
-                        .font(MPTStyle.body())
-                    Image(systemName: "chevron.down").font(.caption)
+                    Text(shortLang())
+                        .font(MPTStyle.caption())
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down").font(.caption2)
                 }
-                .foregroundColor(MPTStyle.textPrimary)
             }
         }
+        .foregroundColor(MPTStyle.textPrimary)
         .padding(.horizontal, MPTStyle.s4)
-        .padding(.vertical, MPTStyle.s3)
+        .padding(.vertical, MPTStyle.s2)
         .background(MPTStyle.pageBackground)
         .overlay(Rectangle().frame(height: 1).foregroundColor(MPTStyle.divider), alignment: .bottom)
+    }
+
+    private func shortLang() -> String {
+        let m = ["zh": "中文", "en": "EN", "de": "DE", "es": "ES", "fr": "FR", "it": "IT",
+                 "pt": "PT", "ru": "RU", "tr": "TR", "vi": "VI", "id": "ID",
+                 "ko": "KO", "ca": "CA", "az": "AZ"]
+        return m[config.uiLanguage] ?? "中文"
     }
 }

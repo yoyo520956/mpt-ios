@@ -10,6 +10,7 @@ struct MPTTask: Identifiable, Codable, Equatable {
     var createdAt: Date = Date()
     var outputPath: String = ""
     var error: String = ""
+    var note: String = ""
 }
 
 final class TaskManager: ObservableObject {
@@ -45,12 +46,14 @@ final class TaskManager: ObservableObject {
         return t
     }
 
-    func update(_ id: String, state: Int? = nil, progress: Int? = nil, outputPath: String? = nil, error: String? = nil) {
+    func update(_ id: String, state: Int? = nil, progress: Int? = nil,
+               outputPath: String? = nil, error: String? = nil, note: String? = nil) {
         guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
         if let state { tasks[idx].state = state }
         if let progress { tasks[idx].progress = progress }
         if let outputPath { tasks[idx].outputPath = outputPath }
         if let error { tasks[idx].error = error }
+        if let note { tasks[idx].note = note }
         save()
     }
 

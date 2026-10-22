@@ -17,7 +17,7 @@ final class ConfigStore: ObservableObject {
     @Published var llmModel: String = ""
     @Published var logLevel: String = "INFO"
 
-    // Key 列表（1:1 原版设置页 API Key 组）
+    // Key 列表（1:1 原版设置页 API Key 组 + P2 Azure TTS）
     static let keyItems: [KeyItem] = [
         KeyItem(id: "llm_api_key", label: "LLM API Key", group: "LLM"),
         KeyItem(id: "pexels_api_key", label: "Pexels API Key", group: "Material"),
@@ -31,7 +31,9 @@ final class ConfigStore: ObservableObject {
         KeyItem(id: "sonilo_api_key", label: "Sonilo API Key", group: "Voice"),
         KeyItem(id: "siliconflow_api_key", label: "SiliconFlow API Key", group: "Voice"),
         KeyItem(id: "twelvelabs_api_key", label: "TwelveLabs API Key", group: "Video Gen"),
-        KeyItem(id: "upload_post_api_key", label: "Upload Post API Key", group: "Publish")
+        KeyItem(id: "upload_post_api_key", label: "Upload Post API Key", group: "Publish"),
+        KeyItem(id: "azure_tts_key", label: "Azure TTS API Key（可选）", group: "Voice"),
+        KeyItem(id: "azure_tts_region", label: "Azure TTS Region（默认 eastasia）", group: "Voice")
     ]
 
     func key(_ id: String) -> String { KeychainStore.get(id) }
