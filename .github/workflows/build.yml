@@ -32,15 +32,33 @@ jobs:
       - name: Export IPA (无证书 → Payload zip)
         run: |
           mkdir -p build/Payload
-          APP=$(find ~/Library/Developer/Xcode/DerivedData -name 'MoneyPrinterTurbo.app' -path '*iphoneos*' | head -1)
-          if [ -z "$APP" ]; then echo "::error::未找到 .app"; exit 1; fi
+          APP=build/MoneyPrinterTurbo.xcarchive/Products/Applications/MoneyPrinterTurbo.app
+          [ -d "$APP" ] || APP=$(find ~/Library/Developer/Xcode/DerivedData -name 'MoneyPrinterTurbo.app' -path '*iphoneos*' | head -1)
+          if [ -z "$APP" ] || [ ! -d "$APP" ]; then echo "::error::未找到 .app"; exit 1; fi
+          echo "app: $APP"
           cp -R "$APP" build/Payload/
           (cd build && zip -qry MoneyPrinterTurbo-unsigned.ipa Payload)
+          du -h build/MoneyPrinterTurbo-unsigned.ipa
       - name: Verify
         run: |
-          unzip -l build/MoneyPrinterTurbo-unsigned.ipa | grep -q Info.plist
+          python3 - << 'PY'
+          import zipfile, plistlib
+          z = zipfile.ZipFile('build/MoneyPrinterTurbo-unsigned.ipa')
+          names = z.namelist()
+          ppath = next(n for n in names if n.endswith('.app/Info.plist'))
+          p = plistlib.loads(z.read(ppath))
+          print('ipa files:', len(names))
+          print('version:', p['CFBundleShortVersionString'], p['CFBundleVersion'])
+          print('bundle:', p['CFBundleIdentifier'])
+          print('display:', p['CFBundleDisplayName'])
+          print('assets.car:', any('Assets.car' in n for n in names))
+          print('fonts:', sorted(n for n in names if n.endswith('.ttf')))
+          print('bgm:', [n for n in names if n.endswith('.mp3')])
+          print('voices:', any('azure_voices.json' in n for n in names))
+          missing = [k for k in ('CFBundleShortVersionString','CFBundleIdentifier','CFBundleDisplayName') if k not in p]
+          assert not missing, 'Info.plist missing: %s' % missing
+          PY
           strings -a build/MoneyPrinterTurbo-unsigned.ipa | grep -q "MoneyPrinterTurbo" || { echo "::error::缺特征串"; exit 1; }
-          python3 -c "import zipfile,plistlib;z=zipfile.ZipFile('build/MoneyPrinterTurbo-unsigned.ipa');p=plistlib.loads(z.read('Payload/MoneyPrinterTurbo.app/Info.plist'));print('version:',p['CFBundleShortVersionString'],p['CFBundleVersion']);print('bundle:',p['CFBundleIdentifier']);print('display:',p['CFBundleDisplayName'])"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
