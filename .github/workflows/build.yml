@@ -10,6 +10,81 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        continue-on-error: true
+        with:
+          xcode-version: '16.4'
+      - name: Pin Xcode 本机旧版兜底
+        run: |
+          echo "=== 默认 Xcode ==="; xcodebuild -version
+          for X in Xcode_16.4.app Xcode_16.3.app Xcode_16.2.app Xcode_15.4.app; do
+            if [ -d "/Applications/$X" ]; then
+              sudo xcode-select -s "/Applications/$X"
+              echo "=== 切到 $X ==="; xcodebuild -version
+            fi
+          done
+          xcodebuild -showsdks 2>/dev/null | grep -i iphoneos | head -3
+      - name: Diagnose SDK API
+        run: |
+          cat > /tmp/probe.swift <<'EOF'
+          import AVFoundation
+          import CoreImage
+          import CoreMedia
+          import UIKit
+
+          func p1() {
+              let c = AVMutableComposition()
+              _ = c.videoTracks
+              let m = AVMutableAudioMix()
+              _ = m.inputs
+              _ = AVMutableAudioMixInputTrack.self
+              _ = CMTime.zero
+              _ = AVFileType.mp4
+              _ = AVFrameCount(1)
+              _ = AVVideoCompositionLayerInstruction.self
+              _ = kCIInputImageKey
+          }
+          func p2() {
+              let v = AVMutableVideoComposition()
+              v.setValue([AVMutableVideoCompositionInstruction()] as NSArray, forKey: "instructions")
+              v.setValue(CGSize(width: 1080, height: 1920), forKey: "renderSize")
+              v.setValue(true, forKey: "hasAudio")
+              _ = v.hasAudio
+              let c = AVMutableComposition()
+              c.setValue(AVMutableAudioMix(), forKey: "audioMix")
+          }
+          func p3() {
+              let i = AVMutableVideoCompositionInstruction()
+              i.setValue(CMTimeRange(start: .zero, end: .zero), forKey: "timeRange")
+              i.setValue([AVVideoCompositionLayerInstruction()] as NSArray, forKey: "videoLayerInstructions")
+              i.setValue([CIFilter(name: "CIComposite")!] as NSArray, forKey: "filters")
+              let cf = CIFilter(name: "CIComposite")!
+              cf.setValue("videoLayer", forKey: kCIInputImageKey)
+              cf.setValue(CIImage(), forKey: "inCompositeImage")
+              cf.setValue(CMTimeRange(start: .zero, end: .zero), forKey: "inputTime")
+          }
+          func p4() async {
+              let a = AVURLAsset(url: URL(fileURLWithPath: "/tmp/x.mp4"))
+              let c = AVMutableComposition()
+              if let src = a.tracks(withMediaType: AVMediaType.video).first,
+                 let out = c.addMutableTrack(withMediaType: AVMediaType.video, from: a, at: .zero) {
+                  _ = src.naturalSize
+                  _ = src.duration.seconds
+                  _ = try? out.insertTimeRange(CMTimeRange(start: .zero, end: .zero), into: out, at: .zero)
+              }
+              if let ns = a.tracks(withMediaType: AVMediaType.audio).first,
+                 let nTr = c.addMutableTrack(withMediaType: AVMediaType.audio, from: a, at: .zero) {
+                  _ = min(ns.duration, CMTime.zero)
+                  let inp = AVMutableAudioMixInputTrack(track: nTr)
+                  _ = inp
+              }
+              if let s = try? AVAssetExportSession(asset: c, outputFileType: AVFileType.mp4) {
+                  _ = s
+              }
+              _ = a.tracks(withMediaType: AVMediaType.video).first
+          }
+          EOF
+          xcrun swiftc -typecheck -sdk "$(xcrun --sdk iphoneos --show-sdk-path)"             -target arm64-apple-ios16.0 /tmp/probe.swift 2>&1 | tail -50 || echo "probe 有符号解析异常（见上）"
       - name: Install tooling
         run: brew install xcodegen
       - name: Generate project
@@ -19,21 +94,12 @@ jobs:
           SW=$(grep -c '\.swift' MoneyPrinterTurbo.xcodeproj/project.pbxproj || true)
           echo "swift refs: $SW"
           [ "$SW" -ge 12 ] || { echo "::error::Swift 源文件未进工程 ($SW)"; exit 1; }
-      - name: Diagnose resources
-        run: |
-          echo "=== pbxproj 里 Resources 相关行 ==="
-          grep -n "Resources\|xcassets\|\.ttf\|\.mp3\|azure_voices\|ResourcesBuildPhase" MoneyPrinterTurbo.xcodeproj/project.pbxproj | head -40
-          echo "=== app 内文件（archive 成功后才有，这里看 DerivedData）==="
-          find ~/Library/Developer/Xcode/DerivedData -name 'MoneyPrinterTurbo.app' -type d 2>/dev/null | head -3
       - name: Archive
         run: |
-          xcodebuild -project MoneyPrinterTurbo.xcodeproj -scheme MoneyPrinterTurbo \
-            -configuration Release -archivePath build/MoneyPrinterTurbo.xcarchive \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            archive > build.log 2>&1 || true
+          xcodebuild -project MoneyPrinterTurbo.xcodeproj -scheme MoneyPrinterTurbo             -configuration Release -archivePath build/MoneyPrinterTurbo.xcarchive             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""             archive > build.log 2>&1 || true
           echo "===== xcodebuild error/warning 摘要 ====="
-          grep -nE "error:|warning: [^ ]+\.swift" build.log | head -60
-          echo "===== 尾部 30 行 ====="; tail -30 build.log
+          grep -nE -B1 -A3 'error:' build.log | head -160
+          echo "===== 尾部 40 行 ====="; tail -40 build.log
           [ -d build/MoneyPrinterTurbo.xcarchive ] || { echo "::error::BUILD FAILED（无 xcarchive）"; exit 1; }
       - name: Export IPA (无证书 → Payload zip)
         run: |
@@ -66,6 +132,13 @@ jobs:
           PY
           strings -a build/MoneyPrinterTurbo-unsigned.ipa | grep -q "MoneyPrinterTurbo" || { echo "::error::缺特征串"; exit 1; }
       - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MoneyPrinterTurbo-buildlog
+          path: build.log
+          if-no-files-found: ignore
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: MoneyPrinterTurbo-unsigned-ipa

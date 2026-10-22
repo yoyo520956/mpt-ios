@@ -13,6 +13,9 @@ final class VideoPipeline {
 
     func run(config: ConfigStore) async throws -> Output {
         let p = config.params
+        guard !p.videoSubject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw MPTError.notSupported("请先填写视频主题")
+        }
         let fm = FileManager.default
         let root = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MPT", isDirectory: true)
@@ -43,9 +46,10 @@ final class VideoPipeline {
         if keywords.isEmpty {
             prog("生成关键词…", 15)
             if config.readyForLLM() {
-                keywords = (try? await LLMService.shared.generateTerms(
-                    subject: p.videoSubject, script: script, amount: 5, config: config)) ?? ""
-                keywords = dedupeStrings(keywords)
+                if let raw = try? await LLMService.shared.generateTerms(
+                    subject: p.videoSubject, script: script, amount: 5, config: config) {
+                    keywords = dedupeStrings(raw)
+                }
             }
             if keywords.isEmpty { keywords = [p.videoSubject]; notes.append("关键词不可用，用主题检索") }
         }
@@ -117,7 +121,7 @@ final class VideoPipeline {
         let safe = String(p.videoSubject.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0.properties.isIdeographic }.prefix(12))
         let outURL = outDir.appendingPathComponent("MPT-\(tf.string(from: Date()))-\(safe.isEmpty ? "video" : safe).mp4")
         let composer = VideoComposer()
-        let res = try await composer.compose(clips: files, subtitles: subs, narration: narration, bgm: bgm,
+        let res = await composer.compose(clips: files, subtitles: subs, narration: narration, bgm: bgm,
                                              params: p, outURL: outURL,
                                              onProgress: { pct in
             prog("合成视频… \(pct)%", 80 + pct / 5)
