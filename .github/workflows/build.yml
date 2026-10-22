@@ -97,6 +97,19 @@ jobs:
           path: build.log
           if-no-files-found: ignore
 
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/')
-        run: gh release upload "${GITHUB_REF_NAME}" build/MoneyPrinterTurbo-unsigned.ipa --clobber
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MoneyPrinterTurbo-unsigned-ipa
+          path: build/MoneyPrinterTurbo-unsigned.ipa
+
+      - name: Publish release (公网直链)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.1.0
+          name: MoneyPrinterTurbo iOS v1.1.0 (P2 出片流水线)
+          body: |
+            P2：文案→关键词→素材检索(Pexels/Pixabay/Coverr)→TTS→字幕烧录→AVFoundation 合成 MP4
+            界面改为竖版单列布局；任务页可播放/分享成片。
+          files: build/MoneyPrinterTurbo-unsigned.ipa
+          fail_on_unmatched_files: false
