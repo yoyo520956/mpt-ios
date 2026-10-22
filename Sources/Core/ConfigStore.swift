@@ -1,10 +1,8 @@
 import Foundation
 
-/// Global config singleton: LLM Base URL / API Key / Video Params / UI State
 final class ConfigStore: ObservableObject {
     static let shared = ConfigStore()
 
-    // Built-in Agnes 2.0 API
     static let defaultLLMBaseURL = "https://api.agnes-ai.cn"
     static let defaultLLMAPIKey = "c2stWGFHalhKUzc3Rm5pUlZtYWNkYnNmVXdmMU9SNHd0VXhUU050Q0ZnNGNWMUhlUzgy"
 
@@ -16,7 +14,7 @@ final class ConfigStore: ObservableObject {
     @Published var logLevel: String = "INFO" { didSet { savePersisted() } }
 
     static let textModels: [(String, String)] = [
-        ("agnes-3.0-flash", "Agnes 3.0 Flash (Text - Recommended)"),
+        ("agnes-3.0-flash", "Agnes 3.0 Flash (Recommended)"),
         ("agnes-2.5-flash", "Agnes 2.5 Flash"),
         ("agnes-2.0-flash", "Agnes 2.0 Flash")
     ]
@@ -27,6 +25,18 @@ final class ConfigStore: ObservableObject {
 
     func effectiveLLMKey() -> String {
         return !llmAPIKey.isEmpty ? llmAPIKey : Self.defaultLLMAPIKey
+    }
+
+    func key(_ id: String) -> String {
+        return KeychainStore.shared.getString(forKey: id) ?? ""
+    }
+
+    func hasKey(_ id: String) -> Bool {
+        return KeychainStore.shared.getString(forKey: id) != nil
+    }
+
+    func setKey(_ id: String, _ value: String) {
+        KeychainStore.shared.setString(value, forKey: id)
     }
 
     private let prefs = UserDefaults.standard

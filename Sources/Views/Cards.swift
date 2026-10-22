@@ -1,7 +1,5 @@
 import SwiftUI
 
-// Simplified cards: Script + Video (removed Audio/Subtitle details)
-
 struct ScriptCard: View {
     @EnvironmentObject private var config: ConfigStore
     @State private var showAdvanced = false
@@ -11,7 +9,6 @@ struct ScriptCard: View {
 
     var body: some View {
         MPTCard(title: "Script Settings") {
-            // Mode toggle
             HStack {
                 Button(isNovelMode ? "Script Mode" : "Novel Mode") {
                     withAnimation { isNovelMode.toggle() }
@@ -31,8 +28,7 @@ struct ScriptCard: View {
             if isNovelMode {
                 MPTMultilineField(title: "Paste Novel Text (auto-segment)",
                                   text: $novelText,
-                                  placeholder: "Paste your novel content here...
-Supports auto-segment, character consistency, professional prompts")
+                                  placeholder: "Paste your novel content here... Supports auto-segment, character consistency, professional prompts")
                     .frame(height: 120)
                 Text("Will auto-segment and generate video with professional prompt templates")
                     .font(MPTStyle.caption())
@@ -107,18 +103,6 @@ struct VideoCard: View {
             MPTSliderRow(title: "Subtitle Position", range: 30...90, step: 5,
                          value: $config.params.customPosition,
                          valueText: "\(Int(config.params.customPosition))% from top")
-
-            if config.readyForLLM() {
-                VStack(alignment: .leading, spacing: MPTStyle.s2) {
-                    Text("AI素材已启用")
-                        .font(MPTStyle.caption())
-                        .foregroundColor(MPTStyle.brand)
-                    Text("支持: Ken Burns图片动画 + AI文生视频")
-                        .font(MPTStyle.caption2())
-                        .foregroundColor(MPTStyle.textSecondary)
-                }
-                .padding(.vertical, MPTStyle.s2)
-            }
         }
     }
 }
@@ -219,7 +203,7 @@ struct MPTSliderRow: View {
                     .foregroundColor(MPTStyle.textSecondary)
                 Spacer()
                 Text(valueText)
-                    .font(MPTStyle.caption2())
+                    .font(MPTStyle.caption())
                     .foregroundColor(MPTStyle.textSecondary)
             }
             Slider(value: $value, in: range, step: step)
@@ -246,7 +230,7 @@ struct MPTMultilineField: View {
                 .cornerRadius(MPTStyle.radiusSmall)
             if !placeholder.isEmpty {
                 Text(placeholder)
-                    .font(MPTStyle.caption2())
+                    .font(MPTStyle.caption())
                     .foregroundColor(MPTStyle.textTertiary)
             }
         }
