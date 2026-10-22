@@ -16,11 +16,24 @@ targets:
     platform: iOS
     sources:
       - Sources
-    resources:
-      - Resources/Assets.xcassets
-      - Resources/Fonts
-      - Resources/BGM
-      - Resources/azure_voices.json
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
+      - path: Resources/Fonts
+        buildPhase: resources
+      - path: Resources/BGM
+        buildPhase: resources
+      - path: Resources/azure_voices.json
+        buildPhase: resources
+    scripts:
+      - name: CopyExtraResources
+        script: |
+          DEST="${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}/Resources"
+          mkdir -p "$DEST"
+          cp -R Resources/Fonts "$DEST/" 2>/dev/null || true
+          cp -R Resources/BGM "$DEST/" 2>/dev/null || true
+          cp Resources/azure_voices.json "$DEST/" 2>/dev/null || true
+          echo "extra resources:"; find "$DEST" -type f | head -20
+        deps: []
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qingyao.moneyprinterturbo
