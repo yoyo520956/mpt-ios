@@ -19,6 +19,12 @@ jobs:
           SW=$(grep -c '\.swift' MoneyPrinterTurbo.xcodeproj/project.pbxproj || true)
           echo "swift refs: $SW"
           [ "$SW" -ge 12 ] || { echo "::error::Swift 源文件未进工程 ($SW)"; exit 1; }
+      - name: Diagnose resources
+        run: |
+          echo "=== pbxproj 里 Resources 相关行 ==="
+          grep -n "Resources\|xcassets\|\.ttf\|\.mp3\|azure_voices\|ResourcesBuildPhase" MoneyPrinterTurbo.xcodeproj/project.pbxproj | head -40
+          echo "=== app 内文件（archive 成功后才有，这里看 DerivedData）==="
+          find ~/Library/Developer/Xcode/DerivedData -name 'MoneyPrinterTurbo.app' -type d 2>/dev/null | head -3
       - name: Archive
         run: |
           xcodebuild -project MoneyPrinterTurbo.xcodeproj -scheme MoneyPrinterTurbo \
