@@ -1,7 +1,6 @@
 import Foundation
 
-/// P3 Pipeline: Traditional materials + AI Image (Ken Burns) + AI Video generation
-/// Novel mode: auto-segment paste text -> generate per segment -> auto-synthesize
+/// P2 Core Pipeline: Script -> Keywords -> Materials -> Voice -> BGM -> Composite
 final class VideoPipeline {
     var onProgress: ((String, Int) -> Void)?
 
@@ -9,102 +8,79 @@ final class VideoPipeline {
         let url: URL
         var script: String? = nil
         var note: String = ""
-        var isNovelMode: Bool = false
     }
 
-    enum InputType {
-        case subject(String)
-        case novel(String)
-        case customScript(String)
-    }
-
-    func run(config: ConfigStore, input: InputType) async throws -> Output {
+    func run(config: ConfigStore) async throws -> Output {
         let p = config.params
         guard !p.videoSubject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw MPTError.notSupported("Please fill video topic or paste novel content")
+            throw MPTError.notSupported("Please fill video topic")
         }
         let fm = FileManager.default
         let root = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MPT", isDirectory: true)
-        let work = root.appendingPathComponent("work-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        let work = root.appendingPathComponent("work-" + UUID().uuidString.prefix(8), isDirectory: true)
         let outDir = root.appendingPathComponent("outputs", isDirectory: true)
         try? fm.createDirectory(at: work, withIntermediateDirectories: true)
         try? fm.createDirectory(at: outDir, withIntermediateDirectories: true)
         func prog(_ m: String, _ pct: Int) { onProgress?(m, pct) }
 
         // 1. Script
-        var script = ""
-        var isNovel = false
-        switch input {
-        case .subject(let s):
-            script = p.videoScript.trimmingCharacters(in: .whitespacesAndNewlines)
-            if script.isEmpty {
-                prog("Generating script...", 5)
-                script = try await LLMService.shared.generateScript(
-                    subject: s, language: p.videoLanguage,
-                    paragraphNumber: p.paragraphNumber,
-                    scriptPrompt: p.videoScriptPrompt,
-                    systemPrompt: p.customSystemPrompt, config: config)
-            }
-        case .novel(let novelText):
-            isNovel = true
-            script = novelText
-        case .customScript(let s):
-            script = s
+        var script = p.videoScript.trimmingCharacters(in: .whitespacesAndNewlines)
+        var notes: [String] = []
+        if script.isEmpty {
+            prog("Generating script...", 5)
+            script = try await LLMService.shared.generateScript(
+                subject: p.videoSubject, language: p.videoLanguage,
+                paragraphNumber: p.paragraphNumber,
+                scriptPrompt: p.videoScriptPrompt,
+                systemPrompt: p.customSystemPrompt, config: config)
+        } else {
+            prog("Using existing script", 10)
         }
-        guard !script.isEmpty else { throw MPTError.decode("No script obtained") }
-
         let sentences = splitSentences(script)
         guard !sentences.isEmpty else { throw MPTError.decode("Script has no usable sentences") }
 
-        // 2. Material generation (hybrid)
+        // 2. Keywords
+        var keywords = dedupeStrings(p.videoTerms)
+        if keywords.isEmpty {
+            prog("Generating keywords...", 15)
+            if config.readyForLLM() {
+                if let raw = try? await LLMService.shared.generateTerms(
+                    subject: p.videoSubject, script: script, amount: 5, config: config) {
+                    keywords = dedupeStrings(raw)
+                }
+            }
+            if keywords.isEmpty { keywords = [p.videoSubject]; notes.append("Keywords unavailable, using topic") }
+        }
+        prog("Searching materials...", 25)
+
+        // 3. Materials
+        let svc = MaterialService.shared
+        var pool: [MaterialInfo] = []
+        for kw in keywords {
+            pool.append(contentsOf: await svc.searchWithFallback(keyword: kw, prefer: p.videoSource, config: config))
+        }
+        pool = dedupeMaterials(pool)
+        guard !pool.isEmpty else {
+            throw MPTError.network("No materials found: Pexels needs PEXELS_API_KEY")
+        }
+        let shuffle = p.videoConcatMode == .random || p.videoTransitionMode == .shuffle
+        let count = max(3, min(8, sentences.count))
+        let picked: [MaterialInfo] = shuffle
+            ? Array(pool.shuffled().prefix(count))
+            : Array(pool.prefix(count))
         var files: [URL] = []
-        var notes: [String] = []
-        let useAI = config.params.videoSource == "ai-gen" || isNovel
-
-        if useAI && config.readyForLLM() {
-            prog("AI generating...", 30)
-            let aiFiles = try await generateAIContent(sentences: sentences, config: config, work: work)
-            files = aiFiles
-            notes.append("Using AI-generated content")
-        } else {
-            prog("Searching materials...", 20)
-            var keywords = dedupeStrings(p.videoTerms)
-            if keywords.isEmpty {
-                if config.readyForLLM() {
-                    if let raw = try? await LLMService.shared.generateTerms(
-                        subject: p.videoSubject, script: script, amount: 5, config: config) {
-                        keywords = dedupeStrings(raw)
-                    }
-                }
-                if keywords.isEmpty { keywords = [p.videoSubject] }
-            }
-            let svc = MaterialService.shared
-            var pool: [MaterialInfo] = []
-            for kw in keywords {
-                pool.append(contentsOf: await svc.searchWithFallback(keyword: kw, prefer: p.videoSource, config: config))
-            }
-            pool = dedupeMaterials(pool)
-            guard !pool.isEmpty else { throw MPTError.network("No materials found") }
-
-            let count = min(sentences.count, 8)
-            let shuffle = p.videoConcatMode == .random || p.videoTransitionMode == .shuffle
-            let picked: [MaterialInfo] = shuffle
-                ? Array(pool.shuffled().prefix(count))
-                : Array(pool.prefix(count))
-            for (i, m) in picked.enumerated() {
-                prog("Downloading \(i+1)/\(picked.count)...", 35 + Int(Double(i)/Double(picked.count)*15))
-                do {
-                    files.append(try await svc.download(m, to: work))
-                } catch {
-                    notes.append("Material \(i+1) failed")
-                }
+        for (i, m) in picked.enumerated() {
+            prog("Downloading \(i+1)/\(picked.count)...", 30 + Int(Double(i)/Double(picked.count)*25))
+            do {
+                files.append(try await svc.download(m, to: work))
+            } catch {
+                notes.append("Material \(i+1) failed")
             }
         }
+        guard !files.isEmpty else { throw MPTError.network("All downloads failed") }
 
-        if files.isEmpty { throw MPTError.network("All material generation/download failed") }
-
-        // 3. Voice
+        // 4. Voice
         prog("Generating voice...", 60)
         var narration: URL?
         switch p.voiceMode {
@@ -117,7 +93,7 @@ final class VideoPipeline {
             if r.note.contains("silent") { notes.append(r.note) }
         }
 
-        // 4. BGM
+        // 5. BGM
         var bgm: URL?
         switch p.bgmType {
         case "none": break
@@ -127,7 +103,7 @@ final class VideoPipeline {
             if let f = bundleBGM() { bgm = f }
         }
 
-        // 5. Subtitles
+        // 6. Subtitles
         let subs: [String]
         if p.matchMaterialsToScript {
             subs = files.indices.map { sentences[$0 % sentences.count] }
@@ -136,7 +112,7 @@ final class VideoPipeline {
             subs = files.indices.map { mixed[$0 % mixed.count] }
         }
 
-        // 6. Composite
+        // 7. Composite
         prog("Compositing...", 75)
         let tf = DateFormatter()
         tf.dateFormat = "yyyyMMdd-HHmm"
@@ -150,48 +126,11 @@ final class VideoPipeline {
         })
         try? fm.removeItem(at: work)
 
-        var out = Output(url: outURL, script: script, note: notes.joined(separator: ";"), isNovelMode: isNovel)
-        if !res.note.isEmpty { out.note += (out.note.isEmpty ? "" : ";") + res.note }
+        var out = Output(url: outURL, script: script)
+        if !res.note.isEmpty { notes.append(res.note) }
+        out.note = notes.joined(separator: ";")
         MPTLog.info("Pipeline complete: \(out.url.path)")
         return out
-    }
-
-    private func generateAIContent(sentences: [String], config: ConfigStore, work: URL) async throws -> [URL] {
-        var files: [URL] = []
-        let count = sentences.count
-        for (i, sentence) in sentences.enumerated() {
-            prog("AI segment \(i+1)/\(count)...", 30 + Int(Double(i)/Double(count)*25))
-            let prompt = buildVideoPrompt(sentence: sentence, index: i, total: count)
-            do {
-                let vidURL = try await AIGenService.shared.generateVideo(prompt: prompt, duration: 4, config: config)
-                let localURL = work.appendingPathComponent("ai-video-\(i).mp4")
-                if let data = try? Data(contentsOf: vidURL) {
-                    try data.write(to: localURL)
-                    files.append(localURL)
-                }
-            } catch {
-                do {
-                    let imgURLs = try await AIGenService.shared.generateImages(prompt: prompt, count: 3, config: config)
-                    for (j, imgURL) in imgURLs.enumerated() where j < 3 {
-                        let localURL = work.appendingPathComponent("ai-img-\(i)-\(j).jpg")
-                        if let data = try? Data(contentsOf: imgURL) {
-                            try data.write(to: localURL)
-                            files.append(localURL)
-                        }
-                    }
-                } catch {
-                    MPTLog.warning("Segment \(i) AI failed: \(error.localizedDescription)")
-                }
-            }
-        }
-        return files
-    }
-
-    private func buildVideoPrompt(sentence: String, index: Int, total: Int) -> String {
-        let prefix = AIGenService.novelToVideoPrefix
-        let sceneNum = index + 1
-        let cinematic = AIGenService.cinematicKeywords.randomElement() ?? "cinematic lighting"
-        return "\(prefix)\n\n[Scene \(sceneNum)/\(total)]\nOriginal: \(sentence)\n\nGenerate video prompt:"
     }
 
     private func splitSentences(_ s: String) -> [String] {
