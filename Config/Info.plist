@@ -19,11 +19,11 @@
   <array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationPortraitUpsideDown</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
   <key>UIAppFonts</key>
   <array>
-    <string>Fonts/BeVietnamPro-Bold.ttf</string>
-    <string>Fonts/BeVietnamPro-Medium.ttf</string>
-    <string>Fonts/Charm-Bold.ttf</string>
-    <string>Fonts/Charm-Regular.ttf</string>
-    <string>Fonts/UTM Kabel KT.ttf</string>
+    <string>BeVietnamPro-Bold.ttf</string>
+    <string>BeVietnamPro-Medium.ttf</string>
+    <string>Charm-Bold.ttf</string>
+    <string>Charm-Regular.ttf</string>
+    <string>UTM Kabel KT.ttf</string>
   </array>
   <key>NSAppTransportSecurity</key>
   <dict><key>NSAllowsArbitraryLoads</key><true/></dict>
