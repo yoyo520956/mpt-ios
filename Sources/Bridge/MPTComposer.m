@@ -179,6 +179,16 @@
         [MPTComposer setValue:mixInputs forKeys:@[@"inputs", @"inputParameters"] on:mix];
     }
 
+    // ---- 视频合成描述（instructions / renderSize / frameDuration）----
+    AVMutableVideoComposition *vc = [AVMutableVideoComposition videoComposition];
+    [MPTComposer setValue:instructions forKeys:@[@"instructions"] on:vc];
+    CGSize renderSize = CGSizeMake(W, H);
+    [MPTComposer setValue:[NSValue value:&renderSize withObjCType:@encode(CGSize)]
+                 forKeys:@[@"renderSize"] on:vc];
+    CMTime frameDur = CMTimeMake(1, 30);
+    [MPTComposer setValue:[NSValue value:&frameDur withObjCType:@encode(CMTime)]
+                 forKeys:@[@"frameDuration"] on:vc];
+
     // ---- 导出 ----
     AVAssetExportSession *session = [[AVAssetExportSession alloc] initWithAsset:comp
                                                                     presetName:AVAssetExportPresetHighestQuality];
