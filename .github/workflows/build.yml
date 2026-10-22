@@ -11,9 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install tooling
-        run: |
-          brew install xcodegen
-          gem install xcpretty
+        run: brew install xcodegen
       - name: Generate project
         run: xcodegen generate
       - name: Guard (防假成功)
@@ -23,11 +21,14 @@ jobs:
           [ "$SW" -ge 12 ] || { echo "::error::Swift 源文件未进工程 ($SW)"; exit 1; }
       - name: Archive
         run: |
-          set -o pipefail
           xcodebuild -project MoneyPrinterTurbo.xcodeproj -scheme MoneyPrinterTurbo \
             -configuration Release -archivePath build/MoneyPrinterTurbo.xcarchive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            archive | xcpretty --format github
+            archive > build.log 2>&1 || true
+          echo "===== xcodebuild error/warning 摘要 ====="
+          grep -nE "error:|warning: [^ ]+\.swift" build.log | head -60
+          echo "===== 尾部 30 行 ====="; tail -30 build.log
+          [ -d build/MoneyPrinterTurbo.xcarchive ] || { echo "::error::BUILD FAILED（无 xcarchive）"; exit 1; }
       - name: Export IPA (无证书 → Payload zip)
         run: |
           mkdir -p build/Payload

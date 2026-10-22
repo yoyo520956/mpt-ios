@@ -17,7 +17,10 @@ targets:
     sources:
       - Sources
     resources:
-      - Resources
+      - Resources/Assets.xcassets
+      - Resources/Fonts
+      - Resources/BGM
+      - Resources/azure_voices.json
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qingyao.moneyprinterturbo
